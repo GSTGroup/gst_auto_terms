@@ -1,0 +1,642 @@
+<?php
+/**
+* @file
+* GST Auto Terms
+*
+*/
+
+/*
+ * GLOBAL DEFINES
+ */
+define('GST_FIREPHP_ENABLED', 1);
+
+/**
+* Implements hook_help().
+*/
+function gst_auto_terms_help($path, $arg) {
+  if ($path == 'admin/help#gst_auto_terms') {
+    return t('GST Auto Terms Module.');
+  }   
+}
+
+/**
+* Implementation of hook_init().
+*/
+function gst_auto_terms_init() {
+  if (GST_FIREPHP_ENABLED) {
+    // FirePHP Library : http://www.firephp.org/HQ/Use.htm
+    // Docs: http://docs.sourcemint.org/firephp.org/firephp/1/-docs/API/FirePHP
+    $firephp_path = libraries_get_path('FirePHPCore');
+    $firephp_path = ($firephp_path ? $firephp_path . '/lib/FirePHPCore/' : '');
+    include_once $firephp_path . 'FirePHP.class.php';
+    //module_load_include('php', 'devel', "FirePHPCore/lib/FirePHPCore/FirePHP.class");
+    //require_once('FirePHPCore/FirePHP.class.php');
+    global $firephp;
+    $firephp = FirePHP::getInstance(true);
+    $options = array('maxObjectDepth' => 7,
+                     'maxArrayDepth' => 7,
+                     'maxDepth' => 10,
+                     'useNativeJsonEncode' => true,
+                     'includeLineNumbers' => true);
+    $firephp->setOptions($options);  // or FB::setOptions($options);
+    //$firephp->setEnabled(false);  // To turn off ALL FirePHP Console Messages
+  
+    //$mail_system = variable_get('mail_system');
+    //dpm($mail_system);
+    //dfb($mail_system, "mail_system");
+  }
+}
+
+/*
+ * VIEWS HOOKS
+*/
+function gst_auto_terms_views_api() {
+  return array(
+  	'version' => '3',
+  	//'path' => drupal_get_path('module', 'gst_auto_terms'),
+  );
+}
+
+/*
+ * FIELD
+ * 
+ *  NOTE: For data on the various hooks, see field.api.php and field.crud.inc
+ */
+
+function gst_auto_terms_field_info() {
+  return array(
+    'gst_auto_terms_text' => array(
+      'label' => t('GST Auto Term (text)'),
+      'description' => t('This field stores varchar text in the database.'),
+      'settings' => array('max_length' => 255),
+      //'instance_settings' => array('text_processing' => 0),
+  		'instance_settings' => array(
+  		  'vocabulary' => '',
+  		  //ADFTODO: view_page_title .info: See *_instance_settings_form for add'l details
+  			//'view_page_title' => '',
+  		),
+      'default_widget' => 'gst_auto_terms_textfield',
+      'default_formatter' => 'gst_auto_terms_default',
+    ),
+    'gst_auto_terms_text_long' => array(
+      'label' => t('GST Auto Terms (long text)'),
+      'description' => t('This field stores long text in the database.'),
+  		'settings' => array(),
+      //'instance_settings' => array('text_processing' => 0),
+  		'instance_settings' => array(
+  			'vocabulary' => '',
+        //ADFTODO: view_page_title .info: See *_instance_settings_form for add'l details  			
+  			//'view_page_title' => '',
+  		),
+      'default_widget' => 'gst_auto_terms_textarea',
+      'default_formatter' => 'gst_auto_terms_default',
+    ),
+  );
+}
+
+function gst_auto_terms_field_schema($field) {
+  switch ($field['type']) {
+    case 'gst_auto_terms_text':
+      $columns = array(
+        'value' => array(
+          'type' => 'varchar',
+          'length' => $field['settings']['max_length'],
+          'not null' => FALSE,
+        ),
+      );
+    break;
+  
+    case 'gst_auto_terms_text_long':
+      $columns = array(
+        'value' => array(
+          'type' => 'text',
+          'size' => 'big',
+          'not null' => FALSE,
+      ),
+      );
+      break;
+  }
+  return array(
+    'columns' => $columns,
+  	//'indexes' => array('lid' => array('lid')), // No Indexes for these fields
+  );
+}
+
+/**
+* Implements hook_field_is_empty().
+*/
+function gst_auto_terms_field_is_empty($item, $field) {
+  if (!isset($item['value']) || $item['value'] === '') {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+* Implements hook_field_settings_form().
+*/
+function gst_auto_terms_field_settings_form($field, $instance, $has_data) {
+  $settings = $field['settings'];
+
+  $form = array();
+
+  if ($field['type'] == 'gst_auto_terms_text') {
+    $form['max_length'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Maximum length'),
+      '#default_value' => $settings['max_length'],
+      '#required' => TRUE,
+      '#description' => t('The maximum length of the field in characters.'),
+      '#element_validate' => array('_element_validate_integer_positive'),
+    // @todo: If $has_data, add a validate handler that only allows
+    // max_length to increase.
+      '#disabled' => $has_data,
+    );
+  }
+
+  return $form;
+}
+
+
+/**
+ * Implements hook_field_instance_settings_form().
+ */
+function gst_auto_terms_field_instance_settings_form($field, $instance) {
+  $settings = $instance['settings'];
+
+  // Get proper values use in creating the View and Term entries for this field.
+  $vocabularies = taxonomy_get_vocabularies();
+  $options = array();
+  foreach ($vocabularies as $vocabulary) {
+    $options[$vocabulary->machine_name] = $vocabulary->name;
+  }
+  
+  $form['vocabulary'] = array(
+  	'#type' => 'select',
+    '#title' => t('Vocabulary'),
+    '#default_value' => $settings['vocabulary'],
+    '#options' => $options,
+    '#required' => TRUE,
+    '#description' => t('The vocabulary which supplies the options for this field.'),
+    //'#disabled' => $has_data,  
+  );
+  
+  //ADFTODO: Either remove view_page_title setting or complete implementation.
+  // The problem is this: since the "terms" are tied to a field, and
+  // the "view" that prints out the "links" has no idea *which* field caused
+  // the "term" to be added, it really doesn't make sense to store the "title"
+  // here. It might make more sense to have a specific "title" for each 
+  // specific "term" and instead of storing that here, store that on the Taxonomy
+  // settings page for the Taxonomy vocabulary.
+  /*
+  $form['view_page_title'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Vocabulary term page title'),
+    '#default_value' => $settings['view_page_title'],
+    '#size' => 60,
+    '#description' => t('Enter the title to be used as the page title for the page that displays other records with the same term.<br/>'.
+      'Use %T to indicate the vocabulary term.')    
+  );  
+  
+  //ADFTODO: Add ability to "change" the Vocabulary and have it "update" (or "clean?") existing records
+  // - in detail, the existing entries will have created "term" entries in the OLD Vocabulary
+  // - (when it is changed), so I would need to step thru *EACH* entry and *remove* the Terms
+  // - from the OLD Vocabulary, and add them to the NEW Vocabulary. Not complicated, but
+  // - would need to be done if I want the ability to "change" vocabulary and not have it break existing 
+  // - entries.
+  if (module_exists('token')) {
+    $form['view_page_title']['#description'] .= '<br/>' . t('You may use text replacement tokens in this field.');
+    
+    // Add the token tree UI.
+    $form['token_help_fs'] = array(
+            '#title' => t('Replacement tokens'),
+            '#type' => 'fieldset',
+            '#collapsible' => TRUE,
+            '#collapsed' => TRUE,
+    );
+    $token_types = array('user');
+    $token_types = array_merge($token_types, array_keys($field['bundles']));
+    $form['token_help_fs']['token_help'] = array(
+            '#theme' => 'token_tree',
+            '#token_types' => $token_types,
+            '#global_types' => FALSE,
+    );    
+  }
+	*/
+  
+  return $form;
+}
+
+/*
+ * WIDGET
+ */
+  
+function gst_auto_terms_field_widget_info() {
+  return array(
+    'gst_auto_terms_textfield' => array(
+      'label' => t('Auto Terms (text field)'),
+      'field types' => array('text', 'gst_auto_terms_text'),
+      'settings' => array('size' => 60),
+    ),  
+    'gst_auto_terms_textarea' => array(
+      'label' => t('Auto Terms (textarea - multiple rows)'),
+      'description' => t('Enter Taxonomy Terms in a Textarea'),
+      'field types' => array('text_long', 'gst_auto_terms_text_long'),
+      'settings' => array('rows' => 5),      
+    ),
+  );
+}
+  
+function gst_auto_terms_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $summary_widget = array();
+  $main_widget = array();
+  
+  switch ($instance['widget']['type']) {
+    case 'gst_auto_terms_textfield':
+      $main_widget = $element + array(
+        '#type' => 'textfield',
+        '#default_value' => isset($items[$delta]['value']) ? $items[$delta]['value'] : NULL,
+        '#size' => $instance['widget']['settings']['size'],
+        '#maxlength' => $field['settings']['max_length'],
+        '#attributes' => array('class' => array('text-full')),
+      );
+      break;
+
+    case 'gst_auto_terms_textarea_with_summary':
+      $display = !empty($items[$delta]['summary']) || !empty($instance['settings']['display_summary']);
+      $summary_widget = array(
+        '#type' => $display ? 'textarea' : 'value',
+        '#default_value' => isset($items[$delta]['summary']) ? $items[$delta]['summary'] : NULL,
+        '#title' => t('Summary'),
+        '#rows' => $instance['widget']['settings']['summary_rows'],
+        '#description' => t('Leave blank to use trimmed value of full text as the summary.'),
+        '#attached' => array(
+          'js' => array(drupal_get_path('module', 'text') . '/text.js'),
+        ),
+        '#attributes' => array('class' => array('text-summary')),
+        '#prefix' => '<div class="text-summary-wrapper">',
+        '#suffix' => '</div>',
+        '#weight' => -10,
+      );
+      // Fall through to the next case.
+
+    case 'gst_auto_terms_textarea':
+      $main_widget = $element + array(
+        '#type' => 'textarea',
+        '#default_value' => isset($items[$delta]['value']) ? $items[$delta]['value'] : NULL,
+        '#rows' => $instance['widget']['settings']['rows'],
+        '#attributes' => array('class' => array('text-full')),
+      );
+      break;
+  }
+  
+  if ($main_widget) {
+    // Conditionally alter the form element's type if text processing is enabled.
+    $element['value'] = $main_widget;
+  }
+  if ($summary_widget) {
+    $element['summary'] = $summary_widget;
+  }
+  
+  return $element;  
+}
+
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function gst_auto_terms_field_formatter_info() {
+  return array(
+    'gst_auto_terms_default' => array(
+      'label' => t('Auto Terms Default'),
+      'field types' => array('text', 'text_long', 'text_with_summary'),
+    ),
+  );
+}
+
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function gst_auto_terms_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+
+  switch ($display['type']) {
+    case 'gst_auto_terms_default':
+      foreach ($items as $delta => $item) {
+        $output = _gst_auto_terms_sanitize($instance, $langcode, $item, 'value');
+        $element[$delta] = array('#markup' => $output);
+      }
+      break;
+
+  }
+
+  return $element;
+}
+
+
+/**
+ * Sanitizes the 'value' or 'summary' data of a text value.
+ *
+ * Depending on whether the field instance uses text processing, data is run
+ * through check_plain() or check_markup().
+ *
+ * @param $instance
+ *   The instance definition.
+ * @param $langcode
+ *  The language associated to $item.
+ * @param $item
+ *   The field value to sanitize.
+ * @param $column
+ *   The column to sanitize (either 'value' or 'summary').
+ *
+ * @return
+ *  The sanitized string.
+ */
+function _gst_auto_terms_sanitize($instance, $langcode, $item, $column) {
+  // If the value uses a cacheable text format, text_field_load() precomputes
+  // the sanitized string.
+  if (isset($item["safe_$column"])) {
+    return $item["safe_$column"];
+  }
+  // Convert to array of "links" then implode with commas to return
+  //ADFTODO: Convert $base_path to using "tokens" and add a "setting" to it is user-setable
+  $base_path = "auto_term_d";
+  switch ($instance['entity_type']) {
+    case 'user':
+    case 'profile2':
+      $base_path = 'auto_term_u/';
+      break;
+    case 'node':
+      $base_path = 'auto_term_n/';
+      break;      
+  }
+  $value = $item['value'];
+  $links = array();
+  $flat_value = str_replace(array("\r\n", "\n", "\r"), ",", $value);    // Replace all \r\n with , (commas) (in a textbox, \r\n is a CR)
+  $terms = array_map('trim', explode(',', $flat_value));
+  foreach ($terms as $term) {
+    $path = $base_path . $instance['settings']['vocabulary'] . '/' . check_plain($term);
+    $options = array();
+    $l = l($term, $path, $options);
+    $links[] = $l;
+  }
+  return implode(', ', $links);
+  //return $instance['settings']['text_processing'] ? check_markup($item[$column], $item['format'], $langcode) : check_plain($item[$column]);
+}
+
+/**
+* Implement hook_field_validate().
+* 
+* Possible error codes:
+* - 'number_min': The value is smaller than the allowed minimum value.
+* - 'number_max': The value is larger than the allowed maximum value. 
+*/
+function gst_auto_terms_cck_field_validate($entity_type, $entity, $field, $instance, $langcode, $items, &$errors) {
+  if ($entity_type == 'node') {
+    
+  }  
+}
+
+/**
+ * Implement hook_field_insert().
+ */
+function gst_auto_terms_field_insert($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  if (!empty($items)) {
+    $vocabulary = $instance['settings']['vocabulary'];
+    gst_auto_terms_save_terms($items, $vocabulary);
+    
+    // Add links from Node/User to the TID of the Term
+    _update_term_index($entity_type, $entity, $field, $instance, $langcode, $items);    
+  }  
+}
+
+/**
+ * Implement hook_field_update().
+ */
+function gst_auto_terms_field_update($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  if (!empty($items)) {
+    // Add entries to the Vocabulary:Terms database for any entry user just added
+    $vocabulary = $instance['settings']['vocabulary'];
+    gst_auto_terms_save_terms($items, $vocabulary);
+    
+    $terms = _get_terms_from_items($items);
+    $tids = _existing_terms($vocabulary, $terms);
+    // Add links from Node/User to the TID of the Term
+    _update_term_index($entity_type, $entity, $field, $instance, $langcode, $items);
+    
+    /**
+    if (variable_get('taxonomy_maintain_index_table', TRUE) && $field['storage']['type'] == 'field_sql_storage') {
+      if ($entity_type == 'node') {
+        $first_call = &drupal_static(__FUNCTION__, array());
+      
+        // We don't maintain data for old revisions, so clear all previous values
+        // from the table. Since this hook runs once per field, per object, make
+        // sure we only wipe values once.
+        if (!isset($first_call[$entity->nid])) {
+          $first_call[$entity->nid] = FALSE;
+          db_delete('taxonomy_index')->condition('nid', $entity->nid)->execute();
+        }
+        // Only save data to the table if the node is published.
+        if ($entity->status) {
+          $query = db_insert('taxonomy_index')->fields(array('nid', 'tid', 'sticky', 'created'));
+          foreach ($tids as $tid) {
+            $query->values(array(
+              'nid' => $entity->nid,
+              'tid' => $tid,
+              'sticky' => $entity->sticky,
+              'created' => $entity->created,
+            ));
+          }
+          $query->execute();
+        }
+      } // NODE
+      
+      if ($entity_type == 'profile2') {
+        $first_call = &drupal_static(__FUNCTION__, array());
+      
+        // We don't maintain data for old revisions, so clear all previous values
+        // from the table. Since this hook runs once per field, per object, make
+        // sure we only wipe values once.
+        if (!isset($first_call[$entity->uid])) {
+          $first_call[$entity->uid] = FALSE;
+          db_delete('taxonomy_index_users')->condition('uid', $entity->uid)->execute();
+        }
+        // Now add all the uid-tid entries to the table
+        $query = db_insert('taxonomy_index_users')->fields(array('uid', 'tid'));
+        foreach ($tids as $tid) {
+          $query->values(array(
+            'uid' => $entity->uid,
+            'tid' => $tid,
+          ));
+        }
+        $query->execute();
+      } // PROFILE2
+    }
+    */  
+  }
+}
+
+
+/**
+ * Implement hook_field_delete().
+ */
+function gst_auto_terms_cck_field_delete($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  if ($entity_type == 'node') {
+//     // @TODO: Fix this properly.
+
+//     // Use the CCK storage to figure out the vids that need to be deleted,
+//     // and clean up all the applicable references.
+//     // $db_info = content_database_info($field);
+//     //  $result = db_query('SELECT vid FROM {' . $db_info['table'] . '} WHERE nid = :nid', array(':nid' => $node->nid));
+//     $result = db_query('SELECT vid FROM {node_revision} WHERE nid = :nid', array(':nid' => $entity->nid));
+//     foreach ($result as $row) {
+//       $genid = 'cck:' . $field['field_name'] . ':' . $row->vid;
+//       $locs = array();
+//       location_save_locations($locs, array('genid' => $genid));
+//     }
+  }
+}
+
+function gst_auto_terms_save_terms($items, $vocabulary) {
+  $terms = array();
+  foreach ($items as $delta => $item) {
+    $value = $item['value'];
+    // Get list of Terms to add/update
+    $flat_value = str_replace(array("\r\n", "\n", "\r"), ",", $value);    // Replace all \r\n with , (commas) (in a textbox, \r\n is a CR)
+    $t = array_map('trim', explode(',', $flat_value));
+    $terms = array_merge($terms, $t);
+  }
+  
+  // Now add the Terms
+  //$vocabObj = taxonomy_vocabulary_machine_name_load($vocabulary);
+  gst_auto_terms_update_terms($vocabulary, $terms);
+ 
+  
+}
+
+function gst_auto_terms_update_terms($vocab, $terms) {
+   $vid = _get_vocabulary_vid($vocab);
+   $aterms = is_array($terms) ? $terms : array($terms);   
+//   $query = new EntityFieldQuery();
+//   $result = $query->entityCondition('entity_type', 'taxonomy_term')
+//   ->propertyCondition('vid', $vid, '=')
+//   ->propertyCondition('name', $aterms, 'IN')
+//   ->execute();  
+//   $tids = array_keys($result['taxonomy_term']);
+  $tids = _existing_terms($vocab, $terms);
+  $existing_terms = taxonomy_term_load_multiple($tids);
+  //$existing_term_keys = array_uintersect($aterms, $existing_terms, '_term_compare');
+  $new_terms = array_udiff($aterms, $existing_terms, '_term_compare');
+  foreach($new_terms as $new_term) {
+    $term_obj = new stdClass;
+    $term_obj->vid = $vid;
+    $term_obj->name = $new_term;
+    $status = taxonomy_term_save($term_obj);    
+  }  
+}
+
+/*
+ * Given an array of "items" return an array of each "term" in string form
+ */
+function _get_terms_from_items($items) {
+  $terms = array();
+  foreach ($items as $delta => $item) {
+    $value = $item['value'];
+    // Get list of Terms to add/update
+    $flat_value = str_replace(array("\r\n", "\n", "\r"), ",", $value);    // Replace all \r\n with , (commas) (in a textbox, \r\n is a CR)
+    $t = array_map('trim', explode(',', $flat_value));
+    $terms = array_merge($terms, $t);
+  }
+  return $terms;
+}
+/*
+ * Given a Vocabulary (either a machine_name or the vid)
+ * and a string of "terms" (either 1 term or an array of "terms")
+ * will return an array of 'tid' values for those terms.
+ */
+function _existing_terms($vocab, $terms) {
+  $vid = _get_vocabulary_vid($vocab);
+  $aterms = is_array($terms) ? $terms : array($terms);
+  
+  $query = new EntityFieldQuery();
+  $result = $query->entityCondition('entity_type', 'taxonomy_term')
+  ->propertyCondition('vid', $vid, '=')
+  ->propertyCondition('name', $aterms, 'IN')
+  ->execute();
+  $tids = array_keys($result['taxonomy_term']);  
+  return $tids;
+}
+
+function _term_compare($key1, $key2) {
+  $val1 = is_object($key1) ? $key1->name : $key1;
+  $val2 = is_object($key2) ? $key2->name : $key2;
+  return strcmp($val1, $val2);
+}
+
+function _get_vocabulary_vid($vocab) {
+  if (is_numeric($vocab)) {
+    $vid = $vocab;
+  } else {
+    $vocabObj = taxonomy_vocabulary_machine_name_load($vocab);
+    $vid = $vocabObj->vid;
+  }
+  return $vid;  
+}
+
+function _update_term_index($entity_type, $entity, $field, $instance, $langcode, $items) {
+  $vocabulary = $instance['settings']['vocabulary'];
+  $terms = _get_terms_from_items($items);
+  $tids = _existing_terms($vocabulary, $terms);
+  // Add links from Node/User to the TID of the Term
+  if (variable_get('taxonomy_maintain_index_table', TRUE) && $field['storage']['type'] == 'field_sql_storage') {
+    if ($entity_type == 'node') {
+      $first_call = &drupal_static(__FUNCTION__, array());
+  
+      // We don't maintain data for old revisions, so clear all previous values
+      // from the table. Since this hook runs once per field, per object, make
+      // sure we only wipe values once.
+      if (!isset($first_call[$entity->nid])) {
+        $first_call[$entity->nid] = FALSE;
+        db_delete('taxonomy_index')->condition('nid', $entity->nid)->execute();
+      }
+      // Only save data to the table if the node is published.
+      if ($entity->status) {
+        $query = db_insert('taxonomy_index')->fields(array('nid', 'tid', 'sticky', 'created'));
+        foreach ($tids as $tid) {
+          $query->values(array(
+                'nid' => $entity->nid,
+                'tid' => $tid,
+                'sticky' => $entity->sticky,
+                'created' => $entity->created,
+          ));
+        }
+        $query->execute();
+      }
+    } // NODE
+  
+    if ($entity_type == 'profile2') {
+      $first_call = &drupal_static(__FUNCTION__, array());
+  
+      // We don't maintain data for old revisions, so clear all previous values
+      // from the table. Since this hook runs once per field, per object, make
+      // sure we only wipe values once.
+      if (!isset($first_call[$entity->uid])) {
+        $first_call[$entity->uid] = FALSE;
+        db_delete('taxonomy_index_users')->condition('uid', $entity->uid)->execute();
+      }
+      // Now add all the uid-tid entries to the table
+      $query = db_insert('taxonomy_index_users')->fields(array('uid', 'tid'));
+      foreach ($tids as $tid) {
+        $query->values(array(
+              'uid' => $entity->uid,
+              'tid' => $tid,
+        ));
+      }
+      $query->execute();
+    } // PROFILE2
+  }
+  
+}
+
+

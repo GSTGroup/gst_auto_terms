@@ -1,0 +1,42 @@
+<?php
+
+/**
+* Implements hook_schema().
+*/
+function gst_auto_terms_schema() {
+  $schema['taxonomy_index_users'] = array(
+      'description' => 'Maintains denormalized information about user/term relationships.',
+      'fields' => array(
+        'uid' => array(
+          'description' => 'The {users}.uid this record tracks.',
+          'type' => 'int',
+          'unsigned' => TRUE,
+          'not null' => TRUE,
+          'default' => 0,
+        ),
+        'tid' => array(
+           'description' => 'The term ID.',
+           'type' => 'int',
+           'unsigned' => TRUE,
+           'not null' => TRUE,
+           'default' => 0,
+        ),
+      ),
+      'indexes' => array(
+        'tid' => array('tid'),
+        'uid' => array('uid'),
+      ),
+      'foreign keys' => array(
+        'tracked_user' => array(
+          'table' => 'users',
+          'columns' => array('uid' => 'uid'),
+        ),
+        'term' => array(
+          'table' => 'taxonomy_term_data',
+          'columns' => array('tid' => 'tid'),
+        ),
+      ),
+   );
+
+  return $schema;
+}

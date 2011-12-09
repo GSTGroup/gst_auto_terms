@@ -1,0 +1,13 @@
+name = GST Auto Terms
+description = Provides a widget that can be used with a text or text area field to provide the automatic creation of Taxonomy Terms for a specific Vocabulary.
+package = GST
+core = 7.x
+files[] = gst_auto_terms.module
+
+; Views handlers
+files[] = gst_auto_terms.views_default.inc
+files[] = gst_auto_terms_handler_field_taxonomy_index_users_tid.inc
+
+;dependencies[] = autoload 
+;php = 5.2
+version = "7.x-1.0-alpha1"
